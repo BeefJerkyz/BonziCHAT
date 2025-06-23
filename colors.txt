@@ -1,0 +1,9 @@
+black
+blue
+brown
+green
+pink
+purple
+red
+peedy
+bonzi
