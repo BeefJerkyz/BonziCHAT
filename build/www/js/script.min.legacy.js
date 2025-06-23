@@ -1,0 +1,2183 @@
+var adElement = "#ap_iframe";
+
+$(function() {
+	$(window).load(updateAds);
+	$(window).resize(updateAds);
+	$('body').on('DOMNodeInserted', adElement, updateAds);
+	$('body').on('DOMNodeRemoved', adElement, updateAds);
+});
+
+function updateAds() {
+	var height = $(window).height() -
+		$(adElement).height();
+	var hideAd = height <= 250;
+	if (hideAd) height = $(window).height();
+	$(adElement)[hideAd ? "hide" : "show"]();
+	$("#content").height(height);
+}
+class Bonzi {
+	constructor(id, userPublic) {
+
+		// ========================================================================
+		// VARIABLES/CONSTANTS
+		// ========================================================================
+		this.userPublic = userPublic || {
+			name: "BonziBUDDY",
+			color: "purple",
+			speed: 175,
+			pitch: 50,
+			voice: "en-us"
+		};
+		this.color = this.userPublic.color;
+		this.colorPrev;
+		this.data = window.BonziData;
+
+		this.drag = false;
+		this.dragged = false;
+
+		this.eventQueue = [];
+
+		this.eventRun = true;
+		this.event = null;
+
+		this.willCancel = false;
+
+		this.run = true;
+
+		this.mute = false;
+
+		this.eventTypeToFunc = {
+			"anim": "updateAnim",
+			"html": "updateText",
+			"text": "updateText",
+			"idle": "updateIdle",
+			"add_random": "updateRandom"
+		};
+
+		// ========================================================================
+		// ASSIGN ID
+		// http://stackoverflow.com/a/105074
+		// ========================================================================
+
+		if (typeof id == "undefined") {
+			this.id = s4() + s4();
+		} else this.id = id;
+
+		this.rng = new Math.seedrandom((this.seed || this.id) || Math.random());
+
+		// ========================================================================
+		// HTML POPULATION
+		// ========================================================================
+		this.selContainer = "#content";
+		this.$container	= $(this.selContainer);
+				
+		this.$container.append(`
+			<div id='bonzi_${this.id}' class='bonzi'>
+				<div class='bonzi_name'></div>
+					<div class='bonzi_placeholder'></div>
+				<div style='display:none' class='bubble'>
+					<p class='bubble-content'></p>
+				</div>
+			</div>
+		`);
+
+		this.selElement = "#bonzi_" + this.id;
+		this.selDialog = this.selElement + " > .bubble";
+		this.selDialogCont = this.selElement + " > .bubble > p";
+		this.selNametag = this.selElement + " > .bonzi_name";
+
+		this.selCanvas = this.selElement + " > .bonzi_placeholder";
+		$(this.selCanvas)
+			.width(this.data.size.x)
+			.height(this.data.size.y);
+
+		this.$element	= $(this.selElement);
+		this.$canvas	= $(this.selCanvas);
+		this.$dialog	= $(this.selDialog);
+		this.$dialogCont	= $(this.selDialogCont);
+		this.$nametag	= $(this.selNametag);
+
+		this.updateName();
+
+		$.data(this.$element[0], "parent", this);
+
+	 	this.updateSprite(true);
+
+		// ========================================================================
+		// EVENTS
+		// ========================================================================
+		this.generate_event = function(a, b, c) { // Selector, event, function
+			a[b](e => { this[c](e); });
+		};
+
+		this.generate_event(
+	 		this.$canvas,
+			"mousedown",
+			"mousedown"
+		);
+		
+		this.generate_event(
+			$(window),
+			"mousemove",
+			"mousemove"
+		);
+		
+		this.generate_event(
+			$(window),
+			"mouseup",
+			"mouseup"
+		);
+
+		var coords = this.maxCoords();
+		this.x = coords.x * this.rng();
+		this.y = coords.y * this.rng();
+		this.move();
+		
+		// ========================================================================
+		// MENU
+		// ========================================================================
+
+		$.contextMenu({
+			selector: this.selCanvas,
+			build: ($trigger, e) => {
+				
+                let menu = {
+					items: {
+						"cancel": {
+							name: "Cancel / Interrupt",
+							callback: () => { this.cancel(); }
+						},
+						"mute": {
+							name: () => this.mute ? "Unmute" : "Mute",
+							callback: () => {
+								this.cancel();
+								this.mute = !this.mute;
+							}
+						},
+						/*
+						"egg": {
+							name: "Call an Egg",
+							callback: () => {  
+								socket.emit("command",{list:["asshole",this.userPublic.name]});
+							}
+						},
+						*/
+						"call": {
+							name: "Call this User",
+							callback: () => {  
+								$("#chat_message").val("Hey, "+this.userPublic.name+"! ")
+							}
+						},
+					} 
+				};
+				
+
+				if (authlevel >= 0.5 && authlevel <= 1) {
+                    menu.items.mod = {
+                        name: "YouTuber CMDs",
+                        items: {
+						"youtuber": {
+							name: "Youtoober",
+							callback: () => {  
+								$("#bonzi_chat_text").val("Hey, "+this.userPublic.name+"! Give me your youtube channel NOW! ")
+								}
+							},
+							/*
+                            ban: {
+                                name: "Ban",
+                                callback: () => {
+                                    socket.emit("command", { list: ["ban", bonzi.id] });
+								}
+							},
+							*/
+						}
+					};
+				} else if (authlevel >= 0.5) {
+                    menu.items.mod = {
+                        name: "Funny Mod Menu",
+                        items: {
+                            kick: {
+                                name: "Kick",
+                                callback: () => {
+                                    socket.emit("command", { list: ["kick", bonzi.id] });
+								}
+							},
+							/*
+                            ban: {
+                                name: "Ban",
+                                callback: () => {
+                                    socket.emit("command", { list: ["ban", bonzi.id] });
+								}
+							},
+							*/
+						}
+					};
+				}
+				return menu;
+			},
+			animation: {
+				duration: 1,
+				show: 'fadeIn',
+				hide: 'fadeOut'
+			}
+		});
+		/*
+		$.contextMenu({
+			selector: this.selCanvas,
+			build: ($trigger, e) => {
+				return { items: {
+					"cancel": {
+						name: "Cancel / Interrupt",
+						callback: () => { this.cancel(); }
+					},
+					"mute": {
+						name: () => this.mute ? "Unmute" : "Mute",
+						callback: () => {
+							this.cancel();
+							this.mute = !this.mute;
+						}
+					},
+					"egg": {
+						name: "Call an Egg",
+						callback: () => {  
+							socket.emit("command",{list:["asshole",this.userPublic.name]});
+						}
+					},
+					"call": {
+						name: "Call this User",
+						callback: () => {  
+							$("#chat_message").val("Hey, "+this.userPublic.name+"! ")
+						}
+					},
+				} };
+			},
+			animation: {
+				duration: 1,
+				show: 'fadeIn',
+				hide: 'fadeOut'
+			}
+		});
+		*/
+		// ========================================================================
+		// UPDATE LOOP
+		// ========================================================================
+
+		this.needsUpdate = false;
+
+		this.sprite.gotoAndPlay("surf_intro");
+		
+		// animate while idle
+		var _this = this;
+		setInterval((function() {
+			_this.animate();
+		}).bind(_this), (5 + (Math.floor(Math.random() * 15))) * 1000);
+		setInterval((function() {
+			if (_this.userPublic.color == "bonzi") {
+				
+				if (this.sprite.currentAnimation != "sleep_fwd" && this.sprite.currentAnimation != "sleep_still") {
+					_this.runSingleEvent([{
+						type: "anim",
+						anim: "sleep_fwd",
+						ticks: 120
+					}]);
+				}
+			}
+		}).bind(_this), 180 * 1000);
+	}
+
+	eventMake(list) {
+		return {
+			list: list,
+			index: 0,
+			timer: 0,
+			cur: function() { return this.list[this.index] }
+		};
+	}
+
+	mousedown(e) {
+		if (e.which == 1) {
+			this.drag = true;
+			this.dragged = false;
+			this.drag_start = {
+				x: e.pageX - this.x,
+				y: e.pageY - this.y
+			};
+		}
+	}
+
+	mousemove(e) {
+		if (this.drag) {
+			this.move(
+				e.pageX - this.drag_start.x,
+				e.pageY - this.drag_start.y
+			);
+			this.dragged = true;
+		}
+	}
+
+	move(x, y) {
+		if (arguments.length !== 0) {
+			this.x = x;
+			this.y = y;
+		}
+		var max = this.maxCoords();
+		this.x = Math.min(
+			Math.max(0, this.x),
+			max.x
+		);
+		this.y = Math.min(
+			Math.max(0, this.y),
+			max.y
+		);
+		this.$element.css({
+			"marginLeft": this.x,
+			"marginTop": this.y
+		});
+
+		this.sprite.x = this.x;
+		this.sprite.y = this.y;
+		BonziHandler.needsUpdate = true;
+		this.updateDialog();
+	}
+
+	mouseup(e) {
+		if (!this.dragged && this.drag)
+			this.cancel();
+
+		this.drag = false;
+		this.dragged = false;
+	}
+
+	runSingleEvent(list) {
+		if (!this.mute)
+			this.eventQueue.push(this.eventMake(list));
+	}
+
+	clearDialog() {
+		this.$dialog.fadeOut(150);
+		var _this = this;
+		setTimeout(function(){
+			_this.$dialogCont.html("");
+		},150);
+	}
+
+	cancel() {
+		this.$dialogCont.html("");
+		this.$dialog.fadeOut(150);
+		this.stopSpeaking();
+		this.eventQueue = [this.eventMake([{ type: "idle" }])];
+	}
+
+	retry() {
+		this.clearDialog();
+		this.event.timer = 0;
+	}
+
+	stopSpeaking() {
+		this.goingToSpeak = false;
+		try {
+			this.voiceSource.stop();
+		} catch(e) {}
+	}
+
+	cancelQueue() {
+		this.willCancel = true;
+	}
+
+
+	updateAnim() {
+		if (this.event.timer === 0)
+			this.sprite.gotoAndPlay(this.event.cur().anim);
+		this.event.timer++;
+		BonziHandler.needsUpdate = true;
+		if (this.event.timer >= this.event.cur().ticks)
+			this.eventNext();
+	}
+
+	updateText() {
+		if (this.event.timer === 0) {
+			this.$dialogCont.html("");
+			this.$dialog.fadeIn(150);
+			this.event.timer = 1;
+			this.talk(
+				this.event.cur().text,
+				this.event.cur().say,
+				true
+			);
+		}
+		
+		if (this.$dialog.css("display") == "none")
+			this.eventNext();
+	}
+
+	updateIdle() {
+		var goNext =
+	(this.sprite.currentAnimation == "idle" || this.sprite.currentAnimation == "breathe" || this.sprite.currentAnimation == "cool" || this.sprite.currentAnimation == "write" || this.sprite.currentAnimation == "banana_eat" || this.sprite.currentAnimation == "banana_eat_miss" || this.sprite.currentAnimation == "juggle" || this.sprite.currentAnimation == "yawn" || this.sprite.currentAnimation == "taptaptap" || this.sprite.currentAnimation == "look_left" || this.sprite.currentAnimation == "look_right" || this.sprite.currentAnimation == "look_down" || this.sprite.currentAnimation == "look_up") &&
+			(this.event.timer === 0);
+
+		goNext = goNext ||
+			this.data.pass_idle.indexOf(
+				this.sprite.currentAnimation
+			) != -1;
+
+		if (goNext)
+			this.eventNext();
+		else {
+			if (this.event.timer === 0) {
+				this.tmp_idle_start =
+					this.data.to_idle[this.sprite.currentAnimation];
+				this.sprite.gotoAndPlay(this.tmp_idle_start);
+				this.event.timer = 1;
+			}
+			
+			if (this.tmp_idle_start != this.sprite.currentAnimation)
+				if (this.sprite.currentAnimation == "idle" || this.sprite.currentAnimation == "breathe" || this.sprite.currentAnimation == "cool" || this.sprite.currentAnimation == "write" || this.sprite.currentAnimation == "banana_eat" || this.sprite.currentAnimation == "banana_eat_miss" || this.sprite.currentAnimation == "juggle" || this.sprite.currentAnimation == "yawn" || this.sprite.currentAnimation == "taptaptap" || this.sprite.currentAnimation == "look_left" || this.sprite.currentAnimation == "look_right" || this.sprite.currentAnimation == "look_down" || this.sprite.currentAnimation == "look_up")
+					this.eventNext();
+
+			BonziHandler.needsUpdate = true;
+		}
+	}
+
+	updateRandom() {
+		var add = this.event.cur().add;
+		var index = Math.floor(add.length * this.rng());
+
+		var e = this.eventMake(add[index]);
+		this.eventNext();
+		this.eventQueue.unshift(e);
+	}
+
+	update() {
+		
+        if (this.color.startsWith("http")) {
+            this.$canvas.css("background-image", 'url("' + this.color + '")');
+            this.$canvas.css("background-position-x", -Math.floor(this.sprite.currentFrame % 17) * this.data.size.x + 'px');
+            this.$canvas.css("background-position-y", -Math.floor(this.sprite.currentFrame / 17) * this.data.size.y + 'px');
+		} else this.$canvas.css("background-image", 'none');
+		if (!this.run) return; 
+		// ========================================================================
+		// EVENTS
+		// "the fun part"
+		// ========================================================================
+
+		if ((this.eventQueue.length !== 0) && (this.eventQueue[0].index >= this.eventQueue[0].list.length))
+			this.eventQueue.splice(0,1);
+
+		this.event = this.eventQueue[0];
+
+		if ((this.eventQueue.length !== 0) && this.eventRun) {
+			var eventType = this.event.cur().type;
+			try {
+				this[this.eventTypeToFunc[eventType]]();
+			} catch(e) { this.event.index++; }
+		}
+
+		if (this.willCancel) {
+			this.cancel();
+			this.willCancel = false;
+		}
+
+		if (this.needsUpdate) {
+			this.stage.update();
+			this.needsUpdate = false;
+		}
+	}
+
+	eventNext() {
+		this.event.timer = 0;
+		this.event.index += 1;
+	}
+
+	talk(text, say, allowHtml) {
+		allowHtml = allowHtml || false;
+		text = replaceAll(text, "{NAME}", this.userPublic.name);
+		text = replaceAll(text, "{COLOR}", this.color);
+		if (typeof say !== "undefined") {
+			say = "[[_^_en]] " + replaceAll(say, "{NAME}", this.userPublic.name);
+			say = "[[_^_en]] " + replaceAll(say, "{COLOR}", this.color);
+		} else {
+			say = "[[_^_en]] " + text.replace("&gt;", "").replaceAll(",", ", [[_^_en]]").replaceAll(".", ". [[_^_en]]").replaceAll("?", "? [[_^_en]]").replaceAll("!", "! [[_^_en]]").replaceAll(":", ": [[_^_en]]").replaceAll(";", "; [[_^_en]]");
+		}
+
+		//text = linkify(text);
+		// temporary disable until we find a fix
+		var greentext = 
+			(text.substring(0, 4) == "&gt;") ||
+			(text[0] == ">");
+
+		this.$dialogCont
+			[allowHtml ? "html" : "text"](text.replaceAll("-",""))
+			[greentext ? "addClass" : "removeClass"]("bubble_greentext")
+			.css("display", "block");
+
+		this.stopSpeaking();
+
+		this.goingToSpeak = true;
+        if (!text.startsWith("-")) {
+			speak.play(say, {
+				"pitch": this.userPublic.pitch,
+				"speed": this.userPublic.speed
+			}, () => { // onended
+				this.clearDialog()
+			}, (source) => {
+				if (!this.goingToSpeak) source.stop();
+				this.voiceSource = source;
+			});
+		}
+	}
+
+	joke() { this.runSingleEvent(this.data.event_list_joke); }
+
+	fact() { this.runSingleEvent(this.data.event_list_fact); }
+
+	exit(callback) {
+		this.sprite.gotoAndPlay("surf_away");
+		setTimeout(callback, 2000);
+	}
+
+	deconstruct() {
+		this.stopSpeaking();
+		BonziHandler.stage.removeChild(this.sprite);
+		this.run = false;
+		this.$element.remove();
+	}
+
+	updateName() { if (this.mute) return; this.$nametag.html(this.userPublic.name); }
+
+	youtube(vid) {
+		if (!this.mute) {
+			var tag = "iframe";
+			this.$dialogCont
+				.html(`
+					<${tag} type="text/html" width="173" height="173" 
+					src="https://www.youtube.com/embed/${vid}?autoplay=1" 
+					style="width:173px;height:173px"
+					frameborder="0"
+					allowfullscreen="allowfullscreen"
+					mozallowfullscreen="mozallowfullscreen"
+					msallowfullscreen="msallowfullscreen"
+					oallowfullscreen="oallowfullscreen"
+					webkitallowfullscreen="webkitallowfullscreen"
+					></${tag}>
+				`)
+			this.$dialog.fadeIn(150);
+		}
+	}
+
+	backflip(swag) {
+		var event = [{
+			type: "anim",
+			anim: "backflip",
+			ticks: 15
+		}];
+		if (swag) {
+			event.push({
+				type: "anim",
+				anim: "cool_fwd",
+				ticks: 30
+			});
+			event.push({
+				type: "idle"
+			});
+		}
+		this.runSingleEvent(event);
+	}
+
+	updateDialog() {
+		// ========================================================================
+		// DIALOG BOX
+		// ========================================================================
+		var max = this.maxCoords();
+		if (this.data.size.x + this.$dialog.width() > max.x) {
+			if (this.y < (this.$container.height() / 2) - (this.data.size.x / 2)) {
+				this.$dialog
+					.removeClass("bubble-top")
+					.removeClass("bubble-left")
+					.removeClass("bubble-right")
+					.addClass("bubble-bottom");
+			} else {
+				this.$dialog
+					.removeClass("bubble-bottom")
+					.removeClass("bubble-left")
+					.removeClass("bubble-right")
+					.addClass("bubble-top");
+			}
+		} else {	
+			if (this.y < (this.$container.height() / 2) - (this.data.size.x / 2) && !(this.x < (this.$container.width() / 2) - (this.data.size.x / 2))) {
+				this.$dialog
+					.removeClass("bubble-top")
+					.removeClass("bubble-left")
+					.removeClass("bubble-right")
+					.addClass("bubble-left");
+			} else if (this.y < (this.$container.height() / 2) - (this.data.size.x / 2) && (this.x < (this.$container.width() / 2) - (this.data.size.x / 2))) {
+				this.$dialog
+					.removeClass("bubble-left")
+					.removeClass("bubble-top")
+					.removeClass("bubble-bottom")
+					.addClass("bubble-right");
+			} else if (this.y < (this.$container.height() / 2) - (this.data.size.x / 2)) {
+				this.$dialog
+					.removeClass("bubble-left")
+					.removeClass("bubble-top")
+					.removeClass("bubble-bottom")
+					.removeClass("bubble-right")
+					.addClass("bubble-bottom");
+			} else {
+				this.$dialog
+					.removeClass("bubble-bottom")
+					.removeClass("bubble-left")
+					.removeClass("bubble-right")
+					.addClass("bubble-top");
+			}
+		}
+	}
+
+	maxCoords() {
+		return {
+			x: this.$container.width() - this.data.size.x,
+			y: this.$container.height() - this.data.size.y - $("#chat_bar").height()
+		};
+	}
+
+	asshole(target) {
+		this.runSingleEvent(
+			[{
+				type: "text",
+				text: "Hey, " + target + "!"
+			}, {
+				type: "text",
+				text: "You're a fucking egg!",
+				say: "your a fucking egg!"
+			}, {
+				type: "anim",
+				anim: "grin_fwd",
+				ticks: 15
+			}, {
+				type: "idle"
+			}]
+		);
+	}
+	
+	owo(target) {
+		this.runSingleEvent(
+			[{
+				type: "text",
+				text: `*notices ${target}'s BonziBulge™*`,
+				say: `notices ${target}s bonzibulge`
+			}, {
+				type: "text",
+				text: "owo, wat dis?",
+				say: "oh woah, what diss?"
+			}]
+		);
+	}
+
+	updateSprite(hide) {
+		if (this.mute) return;
+		var stage = BonziHandler.stage;
+		this.cancel();
+		stage.removeChild(this.sprite);
+		if (this.colorPrev != this.color) {
+			if (this.userPublic.color == "bonzi") {
+				
+				delete this.sprite;
+				var d = { images: ["./img/bonzi/"+this.userPublic.color+".png"], frames: BonziData.sprite.frames, animations: BonziData.sprite.new_animations }
+				var shjeet = new createjs.SpriteSheet(d);
+				this.sprite = new createjs.Sprite(shjeet, hide ? "gone" : "idle")
+				
+			} else {
+				delete this.sprite;
+				var d = { images: ["./img/bonzi/"+this.userPublic.color+".png"], frames: BonziData.sprite.frames, animations: BonziData.sprite.animations }
+				var shjeet = new createjs.SpriteSheet(d);
+				this.sprite = new createjs.Sprite(shjeet, hide ? "gone" : "idle")
+			}
+		}
+		stage.addChild(this.sprite);
+		this.move();
+	}
+	animate() {
+		if (this.sprite.currentAnimation == "idle") {
+			
+			if (this.userPublic.color == "bonzi") {
+				if (this.eventQueue.length == 0 && this.userPublic.color == "bonzi") {
+					
+					var i = Math.floor(Math.random() * 15);
+					switch(i){
+						case 1:
+							this.sprite.gotoAndPlay("taptaptap");
+							break;
+						case 2:
+							this.sprite.gotoAndPlay("look_up");
+							break;
+						case 3:
+							this.sprite.gotoAndPlay("look_down");
+							break;
+						case 4:
+							this.sprite.gotoAndPlay("look_left");
+							break;
+						case 5:
+							this.sprite.gotoAndPlay("look_right");
+							break;
+						case 9:
+							this.sprite.gotoAndPlay("cool");
+							break;
+						case 10:
+							this.sprite.gotoAndPlay("juggle");
+							break;
+						case 11:
+							this.sprite.gotoAndPlay("yawn");
+							break;
+						case 12:
+							this.sprite.gotoAndPlay("banana_eat");
+							break;
+						case 13:
+							this.sprite.gotoAndPlay("banana_eat_miss");
+							break;
+						case 14:
+							this.sprite.gotoAndPlay("write");
+							break;
+						default:
+							this.sprite.gotoAndPlay("breathe");
+							break;
+					}
+					
+				}
+				
+			} else {
+					
+				if (this.eventQueue.length == 0 && this.userPublic.color != "peedy") {
+					
+					var i = Math.floor(Math.random() * 10);
+					switch(i){
+						case 1:
+							this.sprite.gotoAndPlay("taptaptap");
+							break;
+						case 2:
+							this.sprite.gotoAndPlay("look_left");
+							break;
+						case 3:
+							this.sprite.gotoAndPlay("look_right");
+							break;
+						case 4:
+							this.sprite.gotoAndPlay("look_down");
+							break;
+						case 9:
+							this.sprite.gotoAndPlay("cool");
+							break;
+						default:
+							this.sprite.gotoAndPlay("breathe");
+							break;
+					}
+					
+				}
+				else if (this.eventQueue.length == 0 && this.userPublic.color == "peedy") {
+					
+					var i = Math.floor(Math.random() * 10);
+					switch(i){
+						case 1:
+							break;
+						case 2:
+							break;
+						case 3:
+							break;
+						case 4:
+							break;
+						case 8:
+							this.sprite.gotoAndPlay("cool_peedy");
+							break;
+						default:
+							break;
+					}
+					
+				}
+				
+			}
+		}
+	}
+}
+var BonziData = {
+	size: {
+		x: 200,
+		y: 160
+	},
+	sprite: {
+		frames: {width: 200, height: 160},
+		new_animations: {
+			idle: 0,
+			surf_intro: [1139, 1164, "idle", 1],
+			surf_away: [1165, 1188, "gone", 1],
+			gone: 1139,
+			
+			surf_across_fwd: [1203, 1211, "surf_across_still", 1],
+			surf_across_still: 1211,
+			surf_across_back: {
+				frames: range(1212,1217),
+				next: "idle",
+				speed: 1
+			},
+			
+			clap_fwd: [10, 12, "clap_still", 1],
+			clap_still: [13, 15, "clap_still", 1],
+			clap_back: {
+				frames: range(12,10),
+				next: "idle",
+				speed: 1
+			},
+			write: {
+				frames: [0,377,376,375,374,373,373,373,373,373,372,371,370,369,368,367,366,678,679,680,681,682,683,684,685,686,686,686,686,687,688,681,682,683,684,685,686,686,686,686,687,688,681,682,683,684,685,686,686,686,686,687,688,681,682,683,684,685,686,686,686,686,687,688,725,726,727,728,728,728,728,728,728,728,728,728,728,728,728,728,728,728,728,728,727,726,725,723,681,682,683,684,685,686,686,686,686,687,688,681,682,683,684,685,686,686,686,686,687,688,680,679,678,724,724,724,724,724,367,368,369,370,371,372,373,373,373,373,373,374,375,376,377,378,0],
+				next: "idle",
+				speed: 0.6
+			},
+			sleep_fwd: {
+				frames: [0,507,508,509,510,511,511,511,511,511,511,511,511,511,511,511,511,511,511,511,510,509,507,507,507,507,507,507,507,507,507,507,507,507,508,508,509,510,511,512,512,512,512,512,512,512,512,512,512,512,512,512,512,511,510,510,510,510,510,510,510,510,510,510,510,510,510,510,511,512,513,514,515,515,515,515,515,515,515,515,515,515,515,515,515,515,515,516,517,518,519,520,521],
+				next: "sleep_still",
+				speed: 0.6
+			},
+			sleep_still: {
+				frames: [521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,522,523,524,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,525,524,523,522,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521,521],
+				next: "sleep_still",
+				speed: 0.6
+			},
+			sleep_back: {
+				frames: [526,527,528,529,530,531,532,533,534,535],
+				next: "idle",
+				speed: 0.6
+			},
+			banana_eat: {
+				frames: [0,826,827,828,829,830,831,832,833,834,835,836,837,838,839,840,841,842,843,844,845,846,847,848,849,850,851,852,853,852,851,852,854,853,852,855,856,857,858,859,860,861,862,863,864,865,866,867,868,869,870,871,872,873,874,875,876,877,878,879,880,881,882,883,884,885,886,0],
+				next: "idle",
+				speed: 0.6
+			},
+			banana_eat_miss: {
+				frames: [0,1024,1025,1026,1027,1028,1029,1030,1031,1032,1033,1034,1035,1036,1037,1038,1039,1040,1041,1042,1043,1043,1043,1043,1043,1043,1043,1043,1043,1043,1043,1044,1045,1046,1047,1047,1047,1047,1047,1047,1047,1047,1047,1050,1051,1052,1053,1053,1053,1053,1053,1053,1053,1053,1053,1053,1053,1052,1051,1050,1057,1054,1055,1056,1056,1056,1056,1056,1056,1056,1056,1056,1055,1054,1057,1058,1058,1058,1058,1058,1058,1059,1060,1058,1058,1058,1058,1058,1058,1058,1058,1058,1061,1062,1063,1064,1065,1066,1067,1068,1069,1070,1071,0],
+				next: "idle",
+				speed: 0.6
+			},
+			cool: {
+				frames: [0,0,438,439,440,441,442,443,444,445,446,447,448,449,450,451,452,453,454,455,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,455,454,453,452,451,450,466,467,466,450,466,467,466,450,451,452,453,454,455,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,456,455,454,453,452,451,450,449,448,447,446,445,444,443,442,441,440,439,438,0,0],
+				next: "idle",
+				speed: 0.6
+			},
+			juggle: {
+				frames:[0,643,644,645,646,647,647,647,648,649,650,651,652,653,654,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,655,656,657,658,659,660,661,661,661,661,661,661,650,649,648,647,647,647,646,645,644,643,0],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_left: {
+				frames: [0,419,420,421,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,422,421,420,419],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_right: {
+				frames: [0,1007,1008,1009,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1010,1009,1008,1007],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_down: {
+				frames: [413,414,415,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,416,415,414,413],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_up: {
+				frames: [0,425,426,427,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,428,427,426,425,0],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			breathe: {
+				frames: [0,41,42,43,44,45,46,46,46,46,45,44,43,42,41,0],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			taptaptap: {
+				frames: [0,999,1000,1001,1002,1002,1002,1002,1002,1002,1002,1001,1000,999,1003,1004,1005,1006,1006,1006,1006,1006,1006,1006,1006,1006,1005,1004,1003,0],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			yawn: {
+				frames: [0,192,193,194,195,196,197,199,200,199,197,199,200,199,197,199,200,199,197,199,200,199,197,199,200,196,195,194,193,192,0],
+				next: "idle",
+				speed: 0.6
+			},
+			shrug_fwd: [28, 33, "shrug_still", 1],
+			shrug_still: 33,
+			shrug_back: {
+				frames: range(33,28	),
+				next: "idle",
+				speed: 1
+			},
+
+			
+			grin_fwd: [1083, 1087, "grin_still", 1], 
+			grin_still: 1087, 
+			grin_back: { 
+				frames: range(1087, 1083), 
+				next: "idle", 
+				speed: 1
+			},
+			
+			praise_fwd: [151, 155, "praise_still", 1], 
+			praise_still: 155, 
+			praise_back: { 
+				frames: range(155, 151), 
+				next: "idle", 
+				speed: 1 
+			},
+			backflip: [163, 175, "idle", 0.5]
+		},
+		animations: {
+			idle: 0,
+			
+			surf_across_fwd: [1, 8, "surf_across_still", 1],
+			surf_across_still: 9,
+			surf_across_back: {
+				frames: range(8,1),
+				next: "idle",
+				speed: 1
+			},
+			
+			clap_fwd: [10, 12, "clap_still", 1],
+			clap_still: [13, 15, "clap_still", 1],
+			clap_back: {
+				frames: range(12,10),
+				next: "idle",
+				speed: 1
+			},
+			
+			surf_intro: [277, 302, "idle", 1],
+			surf_away: [16, 38, "gone", 1],
+			
+			gone: 39,
+			
+			shrug_fwd: [40, 50, "shrug_still", 1],
+			shrug_still: 50,
+			shrug_back: {
+				frames: range(50,40),
+				next: "idle",
+				speed: 1
+			},
+
+			earth_fwd: [51, 57, "earth_still", 1],
+			earth_still: [58, 80, "earth_still", 1],
+			earth_back: [81, 86, "idle", 1],
+						
+			// TODO: ADD BLINK
+			look_down_fwd: [87, 90, "look_down_still", 1],
+			look_down_still: 91,
+			look_down_back: {
+				frames: range(90, 87),
+				next: "idle",
+				speed: 1
+			},
+			
+			// TODO: ADD BLINK
+			lean_left_fwd: [94, 97, "lean_left_still", 1],
+			lean_left_still: 98,
+			lean_left_back: {
+				frames: range(97, 94),
+				next: "idle",
+				speed: 1
+			},
+			
+			beat_fwd: [101, 103, "beat_still", 1],
+			beat_still: [104, 107, "beat_still", 1],
+			beat_back: {
+				frames: range(103, 101),
+				next: "idle",
+				speed: 1
+			},
+			
+			cool: {
+				frames: [108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 127, 128, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129,129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 128, 127, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 131, 132, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 133, 132, 131, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 124, 123, 122, 121, 120, 135, 136, 135, 120, 121, 122, 123, 124, 125, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114, 113, 112, 111, 110, 109, 108, 0],
+				next: "idle",
+				speed: 0.6
+			},
+			cool_peedy: {
+				frames: [108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126,126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114, 113, 112, 111, 110, 109, 108, 0],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			cool_fwd: [108, 126, "cool_still", 1],
+			cool_still: 126,
+			cool_back: {
+				frames: range(124, 108),
+				next: "idle",
+				speed: 1
+			},
+			
+			cool_right_fwd: [126, 128, "cool_right_still", 1],
+			cool_right_still: 129,
+			cool_right_back: {
+				frames: range(128, 126),
+				next: "idle",
+				speed: 1
+			},
+			
+			cool_left_fwd: [131, 133, "cool_left_still", 1],
+			cool_left_still: 134,
+			cool_left_back: {
+				frames: range(133, 131),
+				next: "cool_still",
+				speed: 1
+			},
+			
+			cool_adjust: {
+				frames: [124, 123, 122, 121, 120, 135, 136, 135, 120, 121, 122, 123, 124],
+				next: "cool_still",
+				speed: 1
+			},
+			
+			present_fwd: [137, 141, "present_still", 1],
+			present_still: 142,
+			present_back: {
+				frames: range(141, 137),
+				next: "idle",
+				speed: 1
+			},
+			
+			look_left_fwd: [143, 145, "look_left_still", 1],
+			look_left_still: 146,
+			look_left_back: {
+				frames: range(145, 143),
+				next: "idle",
+				speed: 1
+			},
+			
+			look_left: {
+				frames: [143, 144, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 145, 144, 143],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_right: {
+				frames: [149, 150, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 151, 150, 149],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_down: {
+				frames: [87, 88, 89, 90, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 91, 90, 89, 88, 87],
+				next: "idle",
+				speed: 0.6
+			},
+			
+			look_right_fwd: [149, 151, "look_right_still", 1],
+			look_right_still: 152,
+			look_right_back: {
+				frames: range(151, 149),
+				next: "idle",
+				speed: 1
+			},
+			
+			lean_right_fwd: { 
+				frames: range(158, 156), 
+				next: "lean_right_still", 
+				speed: 1 
+			} ,
+			lean_right_still: 155, 
+			lean_right_back: [156, 158, "idle", 1],
+			
+			praise_fwd: [159, 163, "praise_still", 1], 
+			praise_still: 164, 
+			praise_back: { 
+				frames: range(163, 159), 
+				next: "idle", 
+				speed: 1 
+			},
+			
+			grin_fwd: [182, 189, "grin_still", 1], 
+			grin_still: 184, 
+			grin_back: { 
+				frames: range(184, 182), 
+				next: "idle", 
+				speed: 1
+			},
+				 
+				taptaptap: { 
+					frames: [177,178,179,180,181], 
+					next: "idle", 
+					speed: 0.6
+				},
+				 
+				breathe: { 
+					frames: [165,166,167,168,169,170,170,170,170,170,170,169,168,167,166,165], 
+					next: "idle", 
+					speed: 0.6
+				},
+
+			backflip: [331, 343, "idle", 1]
+		}
+	},
+	to_idle: {
+		surf_across_fwd: "surf_across_back",
+		surf_across_still: "surf_across_back",
+		
+		clap_fwd: "clap_back",
+		clap_still: "clap_back",
+		
+		shrug_fwd: "shrug_back",
+		shrug_still: "shrug_back",
+		
+		earth_fwd: "earth_back",
+		earth_still: "earth_back",
+		
+		look_down_fwd: "look_down_back",
+		look_down_still: "look_down_back",
+		
+		lean_left_fwd: "lean_left_back",
+		lean_left_still: "lean_left_back",
+		
+		beat_fwd: "beat_back",
+		beat_still: "beat_back",
+		
+		cool_fwd: "cool_back",
+		cool_still: "cool_back",
+		cool_adjust: "cool_back",
+		
+		cool_left_fwd: "cool_left_back",
+		cool_left_still: "cool_left_back",
+		
+		present_fwd: "present_back",
+		present_still: "present_back",
+		
+		sleep_fwd: "sleep_back",
+		sleep_still: "sleep_back",
+		
+		look_left_fwd: "look_left_back",
+		look_left_still: "look_left_back",
+		
+		look_right_fwd: "look_right_back",
+		look_right_still: "look_right_back",
+		
+		lean_right_fwd: "lean_right_back",
+		lean_right_still: "lean_right_back",
+		
+		praise_fwd: "praise_back",
+		praise_still: "praise_back",
+		
+		grin_fwd: "grin_back",
+		grin_still: "grin_back",
+		
+		backflip: "idle",
+		
+		breathe: "idle",
+		taptaptap: "idle",
+		
+		look_left: "look_left_back",
+		look_right: "look_right_back",
+		look_down: "lean_right_back",
+		cool: "cool_back",
+		cool_peedy: "cool_back",
+
+		idle: "idle",
+	},
+	pass_idle: [
+		"gone"
+	],
+	event_list_joke_open: [
+			[
+				{
+					type: "text",
+					text: "Yeah, of course you want me to tell a joke."
+				},
+				{
+					type: "anim",
+					anim: "praise_fwd",
+					ticks: 15
+				},
+				{
+					type: "text",
+					text: "\"HAHAHAHA LOOK AT THIS IDIOT NAMED {NAME} TELLING DAD AND STOLEN JOKES!\" Fuck you. It isn't funny.",
+					say: "HAHAHAHA LOOK AT THIS IDIOT NAMED {NAME} TELLING DAD AND STOLEN JOKES! Fuck you. It isn't funny."
+				},
+				{
+					type: "idle"
+				},
+				{
+					type: "text",
+					text: "But I'll do it anyway. Because you want me to."
+				}
+			],[
+				{
+					type: "text",
+					text: "OK {NAME}.",
+					say: "OK, {NAME}."
+				}
+			],[
+				{
+					type: "text",
+					text: "OK, I've got a good one for you."
+				}
+			],[
+				{
+					type: "text",
+					text: "OK, here goes."
+				}
+			],[
+				{
+					type: "text",
+					text: "Anything for you {NAME}."
+				}
+			],[
+				{
+					type: "text",
+					text: "Sure, I've got a ton of them."
+				}
+			],[
+				{
+					type: "text",
+					text: "Not a problem."
+				}
+			],[
+				{
+					type: "text",
+					text: "{NAME}? I didn't know you liked my jokes so much."
+				}
+			],[
+				{
+					type: "text",
+					text: "OK, if you're sure."
+				}
+			]
+	],
+	event_list_joke_mid: [
+			[
+				{
+					type: "text",
+					text: "What is easy to get into, but hard to get out of?"
+				},
+				{
+					type: "text",
+					text: "Child support!"
+				}
+			],[
+				{
+					type: "text",
+					text: "Why do they call HTML HyperText?"
+				},
+				{
+					type: "text",
+					text: "Too much Java!"
+				},
+			],[
+				{
+					type: "text",
+					text: "Two sausages are in a pan. One looks at the other and says \"Boy it's hot in here!\" and the other sausage says \"Unbelievable! It's a talking sausage!\"",
+					say: "Two sausages are in a pan. One looks at the other and says, Boy it's hot in here! and the other sausage says, Unbelievable! It's a talking sausage!"
+				},
+			],[
+				{
+					type: "text",
+					text: "What is in the middle of Paris?"
+				},
+				{
+					type: "text",
+					text: "A big, giant R."
+				}
+			],[
+				{
+					type: "text",
+					text: "What goes in pink and comes out blue?"
+				},
+				{
+					type: "text",
+					text: "Me."
+				}
+			],[
+				{
+					type: "text",
+					text: "What type of water won't freeze?"
+				},
+				{
+					type: "text",
+					text: "Heavy water."
+				}
+			],[
+				{
+					type: "text",
+					text: "Who earns a living by driving his customers away?"
+				},
+				{
+					type: "text",
+					text: "Seamus's past self."
+				},
+				{
+					type: "idle"
+				},
+				{
+					type: "text",
+					text: "Bro banned everyone without actual reasons 💀",
+					say: "Bro banned everyone without actual reasons"
+				}
+			],[
+				{
+					type: "text",
+					text: "What did the digital clock say to the grandfather clock?"
+				},
+				{
+					type: "text",
+					text: "Tick tock."
+				}
+			],[
+				{
+					type: "text",
+					text: "What do you call a man who shaves 10 times a day?"
+				},
+				{
+					type: "text",
+					text: "A skinless person."
+				}
+			],[
+				{
+					type: "text",
+					text: "How do you get water in watermelons?"
+				},
+				{
+					type: "text",
+					text: "I don't know, ask Mother Nature."
+				}
+			],[
+				{
+					type: "text",
+					text: "Why do we call money bread?"
+				},
+				{
+					type: "text",
+					text: "Because everyone <h3>kneeds</h3> it.",
+					say: "Because everyone needs it."
+				}
+			],[
+				{
+					type: "text",
+					text: "What is a cow that eats grass?"
+				},
+				{
+					type: "text",
+					text: "ASS"
+				}
+			],[
+				{
+					type: "text",
+					text: "What has a big mouth but never speaks?"
+				},
+				{
+					type: "text",
+					text: "A whale."
+				},
+				{
+					type: "text",
+					text: "What is full of holes but can hold water?"
+				},
+				{
+					type: "text",
+					text: "Another whale."
+				}
+			]
+	],
+	event_list_joke_end: [
+			[
+				{
+					type: "text",
+					text: "You know {NAME}, a good friend laughs at your jokes even when they're not so funny."
+				},
+			],[
+				{
+					type: "text",
+					text: "Where do I come up with these?"
+				}
+			],[
+				{
+					type: "text",
+					text: "Do I amuse you, {NAME}? Am I funny? Do I make you laugh?"
+				},
+				{
+					type: "text",
+					text: "pls respond",
+					say: "please respond"
+				}
+			],[
+				{
+					type: "text",
+					text: "Maybe I'll keep my day job, {NAME}. Patreon didn't accept me."
+				}
+			],[
+				{
+					type: "text",
+					text: "Laughter is the best medicine!"
+				},
+				{
+					type: "text",
+					text: "Or not."
+				}
+			],[
+				{
+					type: "text",
+					text: "Don't judge me on my sense of humor alone."
+				}
+			]
+	],
+
+// ============================================================================
+
+	event_list_fact_open: [
+		[
+			{
+				type: "html",
+				text: "Hey kids, it's time for a Fun Fact&reg;!",
+				say: "Hey kids, it's time for a Fun Fact!"
+			}
+		], [
+			{
+				type: "html",
+				text: "Hey kids, it's time for a already known fact!",
+			}
+		], [
+			{
+				type: "html",
+				text: "HEY YOU IDIOTS IT'S TIME FOR A STOLEN FACT"
+			}
+		]
+	],
+
+	event_list_fact_mid: [
+		[
+			{
+				type: "anim",
+				anim: "earth_fwd",
+				ticks: 15
+			},
+			{
+				type: "text",
+				text: "Did you know that Uranus is 31,518 miles (50,724 km) in diameter?",
+				say: "Did you know that Yer Anus is 31 thousand 500 and 18 miles in diameter?",
+			},
+			{
+				type: "anim",
+				anim: "earth_back",
+				ticks: 15
+			},
+			{
+				type: "anim",
+				anim: "grin_fwd",
+				ticks: 15
+			}
+		
+			], [
+				{
+					type: "text",
+					text: "Fun Fact: The skript kiddie of this site didn't bother checking if the text that goes into the dialog box is HTML code."
+				},
+				{
+					type: "text",
+					text: "<img src='./img/misc/topjej.png'></img>",
+					say: "toppest jej"
+				},
+				{
+					type: "text",
+					text: "This would soon be a horrible mistake of yours, Joey."
+				},
+			], [
+				{
+					type: "anim",
+					anim: "earth_fwd",
+					ticks: 15
+				},
+				{
+					type: "text",
+					text: "Fun Fact: Half of Techy's (or Seamus) fanboys are stalkers. They have a unhealthy, obsessive relationship with him."
+				},
+				{
+					type: "anim",
+					anim: "earth_back",
+					ticks: 15
+				},
+				{
+					type: "anim",
+					anim: "grin_fwd",
+					ticks: 15
+				},
+				{
+					type: "text",
+					text: "Lets watch them disagree in a childish manner."
+				},
+			], [
+				{
+					type: "text",
+					text: "Do you know what can't handle hate, gets angered over a lil bit of his BonziPEDIA page being edited and loves earrape?"
+				},
+				{
+					type: "text",
+					text: "Well, if you don't know the answer, i'll tell you. It's BonziUSER."
+				}
+			], [
+				{
+					type: "text",
+					text: "Did you know that BonziTV isn't coming back any time soon?"
+				},
+				{
+					type: "anim",
+					anim: "grin_fwd",
+					ticks: 15
+				}
+			]
+		],
+
+		event_list_fact_end: [
+			[
+				{
+					type: "text",
+					text: "o gee whilickers wasn't that sure interesting huh"
+				},
+			], [
+				{
+					type: "idle"
+				}
+			]
+		],
+};
+
+BonziData.event_list_joke = [
+	{
+		type: "add_random",
+		pool: "event_list_joke_open",
+		add: BonziData.event_list_joke_open
+	},
+	{
+		type: "anim",
+		anim: "shrug_fwd",
+		ticks: 15
+	},
+	{
+		type: "add_random",
+		pool: "event_list_joke_mid",
+		add: BonziData.event_list_joke_mid
+	},
+	{
+		type: "idle"
+	},
+	{
+		type: "add_random",
+		pool: "event_list_joke_end",
+		add: BonziData.event_list_joke_end
+	},
+	{
+		type: "idle"
+	}
+];
+
+BonziData.event_list_fact = [
+	{
+		type: "add_random",
+		pool: "event_list_fact_open",
+		add: BonziData.event_list_fact_open
+	},
+	{
+		type: "add_random",
+		pool: "event_list_fact_mid",
+		add: BonziData.event_list_fact_mid
+	},
+	{
+		type: "idle"
+	},
+	{
+		type: "add_random",
+		pool: "event_list_fact_end",
+		add: BonziData.event_list_fact_end
+	},
+	{
+		type: "idle"
+	}
+];
+
+BonziData.event_list_triggered = [
+	{
+		type: "anim",
+		anim: "cool_fwd",
+		ticks: 30
+	},
+	{
+		type: "text",
+		text: "I sexually identify as BonziBUDDY. Ever since I was a young gorilla I dreamed of invading desktops dropping hot sticky tootorals on disgusting PC users.",
+		say: "I sexually identify as BonziBUDDY. Ever since I was a young gorilla I dreamed of invading desktops dropping hot sticky tootorals on disgusting PC users."
+	},
+	{
+		type: "text",
+		text: "People say to me that a person being a BonziBUDDY is impossible and that I’m a fucking virus but I don’t care, I’m beautiful.",
+		say: "People say to me that a person being a BonziBUDDY is impossible and that I'm a fucking virus but I dont care, I'm beautiful."
+	},
+	{
+		type: "text",
+		text: "I’m having an IT intern install Internet Explorer 6, aquarium screensavers and PC Doctor 2016 on my body. From now on I want you guys to call me “Joel” and respect my right to meme from above and meme needlessly.",
+		say: "I'm having an IT intern install Internet Explorer 6, aquarium screensavers and PC Doctor 2016 on my body. From now on I want you guys to call me Joel and respect my right to meme from above and meme needlessly."
+	},
+	{
+		type: "text",
+		text: "If you can’t accept me you’re a gorillaphobe and need to check your file permissions. Thank you for being so understanding.",
+		say: "If you cant accept me your a gorillaphobe and need to check your file permissions. Thank you for being so understanding."
+	},
+	{
+		type: "idle"
+	}
+];
+
+BonziData.event_list_linux = [
+	{
+		type: "text",
+		text: "I'd just like to interject for a moment. What you're refering to as Linux, is in fact, GNU/Linux, or as I've recently taken to calling it, GNU plus Linux."
+	},
+	{
+		type: "text",
+		text: "Linux is not an operating system unto itself, but rather another free component of a fully functioning GNU system made useful by the GNU corelibs, shell utilities and vital system components comprising a full OS as defined by POSIX."
+	},
+	{
+		type: "text",
+		text: "Many computer users run a modified version of the GNU system every day, without realizing it. Through a peculiar turn of events, the version of GNU which is widely used today is often called Linux, and many of its users are not aware that it is basically the GNU system, developed by the GNU Project."
+	},
+	{
+		type: "text",
+		text: "There really is a Linux, and these people are using it, but it is just a part of the system they use. Linux is the kernel: the program in the system that allocates the machine's resources to the other programs that you run. The kernel is an essential part of an operating system, but useless by itself; it can only function in the context of a complete operating system. Linux is normally used in combination with the GNU operating system: the whole system is basically GNU with Linux added, or GNU/Linux. All the so-called Linux distributions are really distributions of GNU/Linux."
+	}
+];
+
+BonziData.event_list_pawn = [
+	{
+		type: "text",
+		text: "Hi, my name is BonziBUDDY, and this is my website. I meme here with my old harambe, and my son, Clippy. Everything in here has an ad and a fact. One thing I've learned after 17 years - you never know what is gonna give you some malware."
+	},
+
+];
+BonziData.event_list_bees = [
+	{
+		type: "text",
+		text: "According to all known laws"
+	},
+	{
+		type: "text",
+		text: "of aviation,"
+	},
+	{
+		type: "text",
+		text: "there is no way a bee"
+	},
+	{
+		type: "text",
+		text: "should be able to fly."
+	},
+	{
+		type: "text",
+		text: "Nah, I'm not doing the whole thing."
+	}
+];
+// var espeak = new Espeak('./js/lib/espeak/espeak.worker.js');
+// var auCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+$(document).ready(function() {
+
+window.BonziHandler = new (function() {
+	this.framerate = 1.0/15.0;
+
+	this.spriteSheets = {};
+	this.prepSprites = function() {
+		var spriteColors = [
+			"black",
+			"blue",
+			"brown",
+			"green",
+			"purple",
+			"red",
+			"pink",
+			"pope",
+			"peedy",
+			"bonzi"
+		];
+
+		for (var i = 0; i < spriteColors.length; i++) {
+			var color = spriteColors[i];
+			var spriteData = {
+				images: ["./img/bonzi/" + color + ".png"],
+				frames: BonziData.sprite.frames,
+				animations: BonziData.sprite.animations
+			};
+			if (color == "bonzi") {
+				
+				spriteData = {
+					images: ["./img/bonzi/" + color + ".png"],
+					frames: BonziData.sprite.frames,
+					animations: BonziData.sprite.new_animations
+				};
+				
+			}
+			this.spriteSheets[color] = new createjs.SpriteSheet(spriteData);
+		}
+	};
+	this.prepSprites();
+
+	this.$canvas = $("#bonzi_canvas");
+	
+	this.stage = new createjs.StageGL(this.$canvas[0], { "transparent": true });
+	this.stage.tickOnUpdate = false;
+	
+	this.resizeCanvas = function() {
+		var width = this.$canvas.width();
+		var height = this.$canvas.height();
+		this.$canvas.attr({
+			"width": this.$canvas.width(),
+			"height": this.$canvas.height()
+		});
+		this.stage.updateViewport(width, height);
+		this.needsUpdate = true;
+		for (var i = 0; i < usersAmt; i++) {
+			var key = usersKeys[i];
+			bonzis[key].move();
+		}
+	};
+	
+	this.resizeCanvas();
+
+	this.resize = function() {
+		setTimeout(this.resizeCanvas.bind(this), 1);
+	};
+
+	this.needsUpdate = true;
+
+	this.intervalHelper = setInterval((function() {
+		this.needsUpdate = true;
+	}).bind(this), 1000);
+
+	this.intervalTick = setInterval((function() {
+		for (var i = 0; i < usersAmt; i++) {
+			var key = usersKeys[i];
+			bonzis[key].update();
+		}
+		this.stage.tick();
+	}).bind(this), this.framerate * 1000);
+	
+	this.intervalMain = setInterval((function() {
+		if (this.needsUpdate) {
+			this.stage.update();
+		}
+	}).bind(this), 1000.0 / 60.0);
+
+
+	$(window).resize(this.resize.bind(this));
+
+	this.bonzisCheck = function() {
+		for (var i = 0; i < usersAmt; i++) {
+			var key = usersKeys[i];
+			if (!(key in bonzis)) {
+				bonzis[key] = new Bonzi(key, usersPublic[key]);
+			} else {
+				var b = bonzis[key];
+				b.userPublic = usersPublic[key];
+				b.updateName();
+				var newColor = usersPublic[key].color;
+				if (b.color != newColor) {
+					b.color = newColor;
+					b.updateSprite();
+				}
+			}
+		}
+	};
+
+	$("#btn_tile").click(function() {
+		var winWidth = $(window).width();
+		var winHeight = $(window).height();
+		var minY = 0;
+		var addY = 80;
+		var x = 0, y = 0;
+		for (var i = 0; i < usersAmt; i++) {
+			var key = usersKeys[i];
+			bonzis[key].move(x, y);
+			
+			x += 200;
+			if (x + 100 > winWidth) {
+				x = 0;
+				y += 160;
+				if (y + 160 > winHeight) {
+					minY += addY;
+					addY /= 2;
+					y = minY;
+				}
+			}
+		}
+	});
+
+	return this;
+})();
+
+});
+
+function range(begin, end) {
+	var array = [];
+	for (var i = begin; i <= end; i++)
+		array.push(i);
+	for (var i = begin; i >= end; i--)
+		array.push(i);
+	return array;
+}
+
+function replaceAll(t, s, r) {
+	return t.replace(new RegExp(s, 'g'), r);
+}
+
+function s4() {
+	return Math.floor((1 + Math.random()) * 0x10000)
+		.toString(16)
+		.substring(1);
+}
+
+// http://stackoverflow.com/a/8260383/2605226
+function youtubeParser(url){
+	var regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#\&\?]*).*/;
+	var match = url.match(regExp);
+	return (match&&match[7].length==11)? match[7] : false;
+}
+
+// http://codereview.stackexchange.com/q/47889
+function rtimeOut(callback,delay){
+ var dateNow=Date.now,
+     requestAnimation=window.requestAnimationFrame,
+     start=dateNow(),
+     stop,
+     timeoutFunc=function(){
+      dateNow()-start<delay?stop||requestAnimation(timeoutFunc):callback();
+     };
+ requestAnimation(timeoutFunc);
+ return{
+  clear:function(){stop=1}
+ };
+}
+
+function rInterval(callback,delay){
+ var dateNow=Date.now,
+     requestAnimation=window.requestAnimationFrame,
+     start=dateNow(),
+     stop,
+     intervalFunc=function(){
+      dateNow()-start<delay||(start+=delay,callback());
+      stop||requestAnimation(intervalFunc);
+     };
+ requestAnimation(intervalFunc);
+ return{
+  clear:function(){stop=1}
+ };
+}
+
+// http://stackoverflow.com/a/14853974/2605226
+// Warn if overriding existing method
+if(Array.prototype.equals)
+    console.warn("Overriding existing Array.prototype.equals. Possible causes: New API defines the method, there's a framework conflict or you've got double inclusions in your code.");
+// attach the .equals method to Array's prototype to call it on any array
+Array.prototype.equals = function (array) {
+    // if the other array is a falsy value, return
+    if (!array)
+        return false;
+
+    // compare lengths - can save a lot of time 
+    if (this.length != array.length)
+        return false;
+
+    for (var i = 0, l=this.length; i < l; i++) {
+        // Check if we have nested arrays
+        if (this[i] instanceof Array && array[i] instanceof Array) {
+            // recurse into the nested arrays
+            if (!this[i].equals(array[i]))
+                return false;       
+        }           
+        else if (this[i] != array[i]) { 
+            // Warning - two different object instances will never be equal: {x:20} != {x:20}
+            return false;   
+        }           
+    }       
+    return true;
+};
+
+// Hide method from for-in loops
+Object.defineProperty(Array.prototype, "equals", {enumerable: false});
+
+// http://stackoverflow.com/a/14333691/2605226
+function linkify(text) {
+    var regex = /(https?:\/\/([-\w\.]+)+(:\d+)?(\/([\w\/_\.]*(\?\S+)?)?)?)/ig
+    return text.replace(regex, "<a href='$1' target='_blank'>$1</a>");
+}
+
+var loadQueue = new createjs.LoadQueue();
+var loadDone = [];
+var loadNeeded = [
+	"bonziBlack",
+	"bonziBlue",
+	"bonziBrown",
+	"bonziGreen",
+	"bonziPurple",
+	"bonziPeedy",
+	"bonziBonzi",
+	"bonziRed",
+	"bonziPink",
+	"topjej"
+];
+
+$(window).load(function() {
+	$("#login_load").hide();
+	$("#login_card").fadeIn(150);
+
+	loadBonzis();
+});
+
+function loadBonzis(callback) {
+	loadQueue.loadManifest([
+		{id: "bonziBlack", src:"./img/bonzi/black.png"},
+		{id: "bonziBlue", src:"./img/bonzi/blue.png"},
+		{id: "bonziBrown", src:"./img/bonzi/brown.png"},
+		{id: "bonziGreen", src:"./img/bonzi/green.png"},
+		{id: "bonziPurple", src:"./img/bonzi/purple.png"},
+		{id: "bonziRed", src:"./img/bonzi/red.png"},
+		{id: "bonziBonzi", src:"./img/bonzi/bonzi.png"},
+		{id: "bonziPeedy", src:"./img/bonzi/peedy.png"},
+		{id: "bonziPink", src:"./img/bonzi/pink.png"},
+		{id: "topjej", src:"./img/misc/topjej.png"}
+	]);
+	loadQueue.on("fileload", function(e) {
+		loadDone.push(e.item.id);
+	}, this);
+	if (callback)
+		loadQueue.on("complete", callback, this);
+}
+// http://stackoverflow.com/a/26118970
+var undefined;
+var hostname = isApp ? "bonkey.world" : window.location.hostname;
+var socket = io("//" + hostname + ":" + window.location.port);
+var authlevel = 0;
+var usersPublic = {};
+var bonzis = {};
+
+var debug = true;
+
+function loadTest() {
+	$("#login_card").hide();
+	$("#login_error").hide();
+	$("#login_load").show();
+
+	login();
+}
+
+function login() {
+	socket.emit("login", {
+		name: $("#login_name").val(),
+		room: $("#login_room").val()
+	});
+
+	setup();
+}
+
+$(function() {
+	$("#login_go").click(loadTest);
+
+	$("#login_room").val(window.location.hash.slice(1));
+
+	$("#login_name, #login_room").keypress(function(e) {
+		if(e.which == 13) login();
+	});
+
+	socket.on("ban", function(data) {
+		$("#page_ban").show();
+		$("#ban_reason").html(data.reason);
+		$("#ban_end").html(new Date(data.end).toString());
+	});
+
+	socket.on("kick", function(data) {
+		$("#page_kick").show();
+		$("#kick_reason").html(data.reason);
+	});
+
+	socket.on("loginFail", function(data) {
+		var errorText = {
+			"nameLength": "Name too long.",
+			"full": "Room is full.",
+			"nameMal": "Nice try. Why would anyone join a room named that anyway?",
+			"toomuch": "You have too many users assigned to your IP. Close some tabs.",
+		};
+		$("#login_card").show();
+		$("#login_load").hide();
+		$("#login_error")
+			.show()
+			.text(
+				"Error: " +
+				errorText[data.reason] +
+				" (" + data.reason + ")"
+			);
+	});
+
+	socket.on("disconnect", function(data) {
+		errorFatal();
+	});
+});
+
+function errorFatal() {
+	if (($("#page_ban").css("display") == "none") || ($("#page_kick").css("display") == "none")) {
+		$("#page_error").show();
+	}
+}
+
+function setup() {
+	$("#chat_send").click(sendInput);
+
+	$("#chat_message").keypress(function(e) {
+		if(e.which == 13) sendInput();
+	});
+
+	socket.on("room", function(data) {
+		$("#room_owner")[data.isOwner ? "show" : "hide"]();
+		$("#room_public")[data.isPublic ? "show" : "hide"]();
+		$("#room_private")[!data.isPublic ? "show" : "hide"]();
+		$(".room_id").text(data.room);
+	});
+
+	socket.on("updateAll", function(data) {
+		$("#page_login").hide();
+		usersPublic = data.usersPublic;
+		usersUpdate();
+		BonziHandler.bonzisCheck();
+	});
+
+	socket.on("update", function(data) {
+		window.usersPublic[data.guid] = data.userPublic;
+		usersUpdate();
+		BonziHandler.bonzisCheck();
+	});
+
+	socket.on("youtube", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.youtube(data.vid);
+	});
+	
+	socket.on("authlevel", function (a) {
+		authlevel = a.level;
+		console.log(a.level)
+	});
+	
+	socket.on("asshole", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.asshole(data.target);
+	});
+
+	socket.on("linux", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.runSingleEvent(b.data.event_list_linux);
+	});
+
+	socket.on("pawn", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.runSingleEvent(b.data.event_list_pawn);
+	});
+
+	socket.on("bees", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.runSingleEvent(b.data.event_list_bees);
+	});
+	
+	socket.on("talk", function(data) {
+		var b = bonzis[data.guid];
+		b.cancel();
+		b.runSingleEvent([{
+			type: "text",
+			text: data.text
+		}]);
+	});
+
+	socket.on("leave", function(data) {
+		var b = bonzis[data.guid];
+		if (typeof b != "undefined") {
+			b.exit((function(data) {
+				this.deconstruct();
+				delete bonzis[data.guid];
+				delete usersPublic[data.guid];
+				usersUpdate();
+			}).bind(b, data));
+		}
+	});
+}
+
+var usersAmt = 0;
+var usersKeys = [];
+
+function usersUpdate() {
+	usersKeys = Object.keys(usersPublic);
+	usersAmt = usersKeys.length;
+}
+
+function sendInput() {
+	var text = $("#chat_message").val();
+	$("#chat_message").val("");
+	if (text.length > 0) {
+		var youtube = youtubeParser(text);
+		if (youtube) {
+			socket.emit("command", {
+				list: ["youtube", youtube]
+			});
+			return;
+		}
+
+		if (text.substring(1,0) == "/") {
+			var list = text.substring(1).split(" ");
+			socket.emit("command", {
+				list: list
+			});
+		} else {
+			socket.emit("talk", {
+				text: text
+			});
+		}
+	}
+}
+// http://stackoverflow.com/a/1781750
+
+function touchHandler(event)
+{
+    var touches = event.changedTouches,
+        first = touches[0],
+        type = "";
+    switch(event.type)
+    {
+        case "touchstart": type = "mousedown"; break;
+        case "touchmove":  type = "mousemove"; break;        
+        case "touchend":   type = "mouseup";   break;
+        default:           return;
+    }
+
+    // initMouseEvent(type, canBubble, cancelable, view, clickCount, 
+    //                screenX, screenY, clientX, clientY, ctrlKey, 
+    //                altKey, shiftKey, metaKey, button, relatedTarget);
+
+    var simulatedEvent = document.createEvent("MouseEvent");
+    simulatedEvent.initMouseEvent(type, true, true, window, 1, 
+                                  first.screenX, first.screenY, 
+                                  first.clientX, first.clientY, false, 
+                                  false, false, false, 0/*left*/, null);
+
+    first.target.dispatchEvent(simulatedEvent);
+    // event.preventDefault();
+}
+
+$(window).load(function(){
+    document.addEventListener("touchstart", touchHandler, true);
+    document.addEventListener("touchmove", touchHandler, true);
+    document.addEventListener("touchend", touchHandler, true);
+    document.addEventListener("touchcancel", touchHandler, true);    
+});
+
+function newupdate()
+{
+	alert('BonziCHAT Version 0.1.4b - Bonzis will now fall asleep from being idle/afk. This is the final update due to a request by our benefactors.');
+}
